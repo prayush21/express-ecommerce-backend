@@ -12,9 +12,11 @@
         "@aws-sdk/client-sns": "^3.699.0",
         "@aws-sdk/client-sqs": "^3.699.0",
         "@aws-sdk/lib-dynamodb": "^3.0.0",
+        "aws-sdk": "^2.1692.0",
         "cors": "^2.8.5",
         "dotenv": "^10.0.0",
         "express": "^4.17.1",
+        "formidable": "^3.5.2",
         "uuid": "^8.3.2"
     },
     "devDependencies": {
