@@ -15,10 +15,11 @@ const {
   ListTopicsCommand,
 } = require("@aws-sdk/client-sns");
 const { SQSClient, SendMessageCommand } = require("@aws-sdk/client-sqs");
+const awsConfig = require("../config/config");
 
 const TABLE_NAME = "UsersTable";
-const snsClient = new SNSClient({});
-const sqsClient = new SQSClient({});
+const snsClient = new SNSClient(awsConfig);
+const sqsClient = new SQSClient(awsConfig);
 
 const userController = {
   getAllUsers: async (req, res) => {
@@ -74,6 +75,7 @@ const userController = {
         createdAt: new Date().toISOString(),
         ...req.body,
       };
+      console.log("create User hadnler");
 
       if (!user.password) {
         throw new Error("Password is required");
@@ -219,23 +221,77 @@ const handleNotification = async (
   CustomerEmail,
   CustomerFirstName
 ) => {
-  // Copy the handleNotification function from index.mjs
-  // Reference lines 221-255
+  try {
+    const topicName = `user-${CustomerFirstName}-actions`;
+    let topicArn;
+    console.log("handleNotifcation");
+
+    if (NotificationType === "Signup") {
+      console.log("handleNotifcation 1");
+      topicArn = await createSnsTopic(topicName);
+      console.log("handleNotifcation 2");
+      await subscribeEmailToSnsTopic(topicArn, CustomerEmail);
+    } else {
+      console.log("handleNotifcation 3");
+      topicArn = await getTopicArn(topicName);
+    }
+
+    await sendToSqsQueue(
+      CustomerFirstName,
+      CustomerEmail,
+      NotificationType,
+      topicArn
+    );
+
+    return {
+      statusCode: 200,
+      body: {
+        message: "User data processed successfully",
+        username: CustomerFirstName,
+        email: CustomerEmail,
+        topicArn: topicArn,
+      },
+    };
+  } catch (error) {
+    console.error(`Error processing user data: ${error.message}`);
+    throw error;
+  }
 };
 
 const createSnsTopic = async (topicName) => {
-  // Copy the createSnsTopic function from index.mjs
-  // Reference lines 257-270
+  const params = {
+    Name: topicName,
+  };
+  const command = new CreateTopicCommand(params);
+  const response = await snsClient.send(command);
+  console.log(`Created SNS topic: ${topicName}, ARN: ${response.TopicArn}`);
+  return response.TopicArn;
 };
 
 const subscribeEmailToSnsTopic = async (topicArn, email) => {
-  // Copy the subscribeEmailToSnsTopic function from index.mjs
-  // Reference lines 272-281
+  const params = {
+    TopicArn: topicArn,
+    Protocol: "email",
+    Endpoint: email,
+  };
+  const command = new SubscribeCommand(params);
+  const response = await snsClient.send(command);
+  console.log(
+    `Subscribed ${email} to ${topicArn}, Subscription ARN: ${response.SubscriptionArn}`
+  );
 };
 
 const getTopicArn = async (topicName) => {
-  // Copy the getTopicArn function from index.mjs
-  // Reference lines 283-293
+  const command = new ListTopicsCommand({});
+  console.log("get topic arns");
+  const response = await snsClient.send(command);
+  for (const topic of response.Topics) {
+    const topicArn = topic.TopicArn;
+    if (topicArn.endsWith(`:${topicName}`)) {
+      return topicArn;
+    }
+  }
+  return null;
 };
 
 const sendToSqsQueue = async (
@@ -244,8 +300,43 @@ const sendToSqsQueue = async (
   NotificationType,
   topicArn
 ) => {
-  // Copy the sendToSqsQueue function from index.mjs
-  // Reference lines 295-326
+  console.log(
+    "sendToSqsQueue",
+    CustomerFirstName,
+    CustomerEmail,
+    NotificationType
+  );
+  const queueUrl = process.env.QUEUE_URL;
+  const MessageAttributes = {
+    CustomerFirstName: {
+      DataType: "String",
+      StringValue: CustomerFirstName,
+    },
+    CustomerEmail: {
+      DataType: "String",
+      StringValue: CustomerEmail,
+    },
+    NotificationType: {
+      DataType: "String",
+      StringValue: NotificationType,
+    },
+    TopicArn: {
+      DataType: "String",
+      StringValue: topicArn,
+    },
+  };
+  const delaySeconds = NotificationType === "Signup" ? 40 : 0;
+  const params = {
+    QueueUrl: queueUrl,
+    DelaySeconds: delaySeconds,
+    MessageAttributes,
+    MessageBody: `Notification for ${CustomerFirstName}`,
+  };
+  const command = new SendMessageCommand(params);
+  const response = await sqsClient.send(command);
+  console.log(
+    `Sent message to SQS queue: ${queueUrl}, Message ID: ${response.MessageId}`
+  );
 };
 
 module.exports = userController;
